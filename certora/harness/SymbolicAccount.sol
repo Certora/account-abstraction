@@ -14,9 +14,7 @@ contract SymbolicAccount  {
     external  returns (uint256 validationData)
     {
         bytes32 encode = keccak256(abi.encodePacked(userOp.sender, userOp.nonce, userOp.callData));
-        validationData = _packValidationData(validationReturnValue[encode].aggregator, 
-                                                    validationReturnValue[encode].validAfter,
-                                                    validationReturnValue[encode].validUntil);
+        validationData = _packValidationData(validationReturnValue[encode]);
 
     }
 
@@ -27,5 +25,9 @@ contract SymbolicAccount  {
             i++
     }
     */
+    bool public called; 
+    fallback() external payable  {
+        called = true ;
+    }
 }
 
