@@ -238,7 +238,7 @@ contract EntryPoint is IEntryPoint, StakeManager {
 
         IPaymaster.PostOpMode mode = IPaymaster.PostOpMode.opSucceeded;
         if (callData.length > 0) {
-            bool success = Exec.call(mUserOp.sender, 0, callData, callGasLimit);
+            bool success = Exec.call(constantSender, 0, callData, callGasLimit);
             if (!success) {
                 bytes memory result = Exec.getReturnData(REVERT_REASON_MAX_LEN);
                 if (result.length > 0) {
@@ -387,6 +387,7 @@ contract EntryPoint is IEntryPoint, StakeManager {
      * revert (with FailedOp) in case validateUserOp reverts, or account didn't send required prefund.
      * decrement account's deposit if needed
      */
+     address public constantSender ; //temp fix 
     function _validateAccountPrepayment(uint256 opIndex, UserOperation calldata op, UserOpInfo memory opInfo, uint256 requiredPrefund)
     internal returns (uint256 gasUsedByValidateAccountPrepayment, uint256 validationData) {
     unchecked {
@@ -401,7 +402,7 @@ contract EntryPoint is IEntryPoint, StakeManager {
             uint256 bal = balanceOf(sender);
             missingAccountFunds = bal > requiredPrefund ? 0 : requiredPrefund - bal;
         }
-        try IAccount(sender).validateUserOp{gas : mUserOp.verificationGasLimit}(op, opInfo.userOpHash, missingAccountFunds)
+        try IAccount(constantSender).validateUserOp{gas : mUserOp.verificationGasLimit}(op, opInfo.userOpHash, missingAccountFunds)
         returns (uint256 _validationData) {
             validationData = _validationData;
         } catch Error(string memory revertReason) {
