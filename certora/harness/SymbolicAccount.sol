@@ -7,6 +7,8 @@ import "../../contracts/core/Helpers.sol";
  * Symbolic account for verifying that evey executed call has been verified 
  */
 contract SymbolicAccount  {
+    bytes[] public message_data;
+    bool public called; 
 
     // unconstraint values - can be any value
     mapping(bytes32 => ValidationData) public validationReturnValue;
@@ -27,27 +29,9 @@ contract SymbolicAccount  {
 
     }
 
-
-    // writing as a fallback function requires assembly, which will take some time for
-    // me to learn writing. 
-    // let's start with a simple implementation as `execute`
-
-    function execute(address target, uint256 value, bytes calldata data) external {
-        // _requireFromEntryPointOrOwner();
-        calldatas[count] = data;
-        count++;
-    }
-
-    //todo - in fallback mark which userOp has been called
-    /*
-    execute(userOp) {
-            called[i] = userOp 
-            i++
-    }
-    */
-    bool public called; 
     fallback() external payable  {
-        called = true ;
+        called = true;
+        message_data.push(msg.data);
     }
 }
 
