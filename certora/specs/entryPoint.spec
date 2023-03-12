@@ -12,6 +12,8 @@ methods {
      validatePaymasterUserOp(account.UserOperation  userOp, bytes32 userOpHash, uint256 maxCost)=> NONDET
 
     postOp(uint8 mode, bytes  context, uint256 actualGasCost) => NONDET 
+
+    testMsgData(uint x) returns (uint8)
 }
 rule sanity(method f) {
     env e;
@@ -26,4 +28,14 @@ rule fallbackCalled(method f) {
     require !account.called();
     f(e,args);
     assert !account.called();
+}
+
+
+
+rule verifyMsgData(uint8 x) {
+    env e;
+    
+    uint8 res = testMsgData(e, 200);
+    assert res == 200;
+
 }

@@ -31,6 +31,9 @@ contract EntryPoint is IEntryPoint, StakeManager {
 
     uint256 private constant REVERT_REASON_MAX_LEN = 2048;
 
+    // test
+    uint256 public i;
+
     /**
      * for simulation purposes, validateUserOp (and validatePaymasterUserOp) must return this value
      * in case of signature failure, instead of revert.
@@ -616,6 +619,14 @@ contract EntryPoint is IEntryPoint, StakeManager {
     // account and paymaster.
     function numberMarker() internal view {
         assembly {mstore(0, number())}
+    }
+
+    // test only
+    function testMsgData(uint x) public returns (uint8)  {
+        unchecked {
+            i = x + 1;
+        }
+        return uint8(msg.data[msg.data.length - 1]) + 1;
     }
 }
 
