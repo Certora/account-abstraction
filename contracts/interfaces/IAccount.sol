@@ -31,4 +31,8 @@ interface IAccount {
      */
     function validateUserOp(UserOperation calldata userOp, bytes32 userOpHash, uint256 missingAccountFunds)
     external returns (uint256 validationData);
+
+    // harness: simulation of execution fallback
+    function execute(address to, bytes memory data, uint256 txGas) 
+    external returns (bool);
 }

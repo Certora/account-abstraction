@@ -241,7 +241,12 @@ contract EntryPoint is IEntryPoint, StakeManager {
 
         IPaymaster.PostOpMode mode = IPaymaster.PostOpMode.opSucceeded;
         if (callData.length > 0) {
-            bool success = Exec.call(constantSender, 0, callData, callGasLimit);
+            // bool success = Exec.call(constantSender, 0, callData, callGasLimit);
+            
+            /* 
+                replacing the Exec.call with a munged function
+            */
+            bool success = IAccount(constantSender).execute(constantSender, callData, callGasLimit);
             if (!success) {
                 bytes memory result = Exec.getReturnData(REVERT_REASON_MAX_LEN);
                 if (result.length > 0) {
@@ -623,10 +628,7 @@ contract EntryPoint is IEntryPoint, StakeManager {
 
     // test only
     function testMsgData(uint x) public returns (uint8)  {
-        unchecked {
-            i = x + 1;
-        }
-        return uint8(msg.data[msg.data.length - 1]) + 1;
+        return uint8(msg.data[msg.data.length - 1]);
     }
 }
 

@@ -29,6 +29,10 @@ contract SymbolicAccount  {
 
     }
 
+    function execute(address to, bytes memory data, uint256 txGas) external returns (bool) {
+        return true;
+    }
+
     fallback() external payable  {
         called = true;
         message_data.push(msg.data);
