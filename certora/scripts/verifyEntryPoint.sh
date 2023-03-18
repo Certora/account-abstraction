@@ -5,4 +5,5 @@ certoraRun \
  --staging master \
  --optimistic_loop --optimistic_hashing --settings -optimisticFallback=true  \
  --link EntryPoint:constantSender=SymbolicAccount \
+ --loop_iter 1 \
  --msg "entrypoint $1"
