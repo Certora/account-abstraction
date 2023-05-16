@@ -19,9 +19,9 @@ pragma solidity ^0.8.12;
      */
     struct UserOperation {
 
-        address sender;
-        uint256 nonce;
-        bytes initCode;
+        address sender; // 0
+        uint256 nonce; // 1
+        bytes initCode; // 2
         bytes callData;
         uint256 callGasLimit;
         uint256 verificationGasLimit;
@@ -29,7 +29,11 @@ pragma solidity ^0.8.12;
         uint256 maxFeePerGas;
         uint256 maxPriorityFeePerGas;
         bytes paymasterAndData;
-        bytes signature;
+        bytes signature; // 10
+        // encoding of initCode
+        // encoding of callData
+        // encoding of paymasterAndData
+        // sig.offset -> encoding of signature
     }
 
 /**
@@ -68,7 +72,7 @@ library UserOperationLib {
             let ofs := userOp
             let len := sub(sub(sig.offset, ofs), 32)
             ret := mload(0x40)
-            mstore(0x40, add(ret, add(len, 32)))
+            mstore(0x40, add(ret, add(and(add(31, len), not(31)), 32))) //mstore(0x40, add(ret, add(len, 32)))
             mstore(ret, len)
             calldatacopy(add(ret, 32), ofs, len)
         }

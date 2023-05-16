@@ -1,41 +1,41 @@
-using SymbolicAccount as account 
+using SymbolicAccount as account;
 
 methods {
 
-    validateUserOp(account.UserOperation,bytes32,uint256) => DISPATCHER(true)
-    account.called() returns (bool) envfree;
+    function _.validateUserOp(EntryPoint.UserOperation,bytes32,uint256) external => DISPATCHER(true);
+    //function SymbolicAccount.called() external returns (bool) envfree;
 
     // 
-    createSender(bytes initCode) returns (address) => NONDET 
+    function _.createSender(bytes initCode) external => NONDET;
 
     // Paymaster
-   // validatePaymasterUserOp(account.UserOperation  userOp, bytes32 userOpHash, uint256 maxCost)=> NONDET
+   // validatePaymasterUserOp(EntryPoint.UserOperation  userOp, bytes32 userOpHash, uint256 maxCost)=> NONDET
 
-    validatePaymasterUserOp((address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes) userOp, bytes32 userOpHash, uint256 maxCost)=> NONDET
+    function _.validatePaymasterUserOp(EntryPoint.UserOperation userOp, bytes32 userOpHash, uint256 maxCost) external => NONDET;
 
-    balanceOf(address user) returns (uint256) envfree
+    function balanceOf(address) external returns (uint256) envfree;
  
 
-    postOp(uint8 mode, bytes context, uint256 actualGasCost) => NONDET 
+    function _.postOp(uint8 mode, bytes context, uint256 actualGasCost) external => NONDET;
 
-    account.validatedLength()  returns (uint256) envfree
-    account.calledLength()  returns (uint256) envfree
-    account.called_data(uint256 index) returns (bytes) envfree
-    account.validated_data(uint256 index) returns (bytes) envfree
-    account.eq(uint256 index) returns (bool) envfree
+    function SymbolicAccount.validatedLength()  external returns (uint256) envfree;
+    function SymbolicAccount.calledLength()  external returns (uint256) envfree;
+    function SymbolicAccount.called_data(uint256 index) external returns (bytes) envfree;
+    function SymbolicAccount.validated_data(uint256 index) external returns (bytes) envfree;
+    function SymbolicAccount.eq(uint256 index) external returns (bool) envfree;
 }
 
 //// # Verifies that certain function always revert as expected */
 rule alwaysRevert(method f) 
     filtered { f->
-            f.selector == _validateSenderAndPaymaster(bytes,address,bytes).selector ||
-            f.selector == getSenderAddress(bytes).selector ||
-            f.selector == simulateValidation((address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)).selector }
+            f.selector == sig:_validateSenderAndPaymaster(bytes,address,bytes).selector ||
+            f.selector == sig:getSenderAddress(bytes).selector ||
+            f.selector == sig:simulateValidation(EntryPoint.UserOperation).selector }
 
     {
         env e;
         calldataarg args;
-        f(e,args);
+        f@withrevert(e,args);
         assert lastReverted; 
 }
 
@@ -45,7 +45,7 @@ rule alwaysRevert(method f)
 * Verified by keeping track of opcodes that have been verified and executed opcodes
 */
 
-rule onyValidatedCalls(method f, uint index) {
+rule onlyValidatedCalls(method f, uint index) {
     env e;
     calldataarg args;
     require account.validatedLength() == 0;
@@ -68,5 +68,12 @@ rule onlySelfReduces(method f, address user) {
     uint256 before =  balanceOf(user);
     f(e, args);
     uint256 after =  balanceOf(user);
-    assert (after < before => e.msg.sender == user);
+    assert after < before => e.msg.sender == user;
+}
+
+rule sanity(method f) {
+    env e;
+    calldataarg arg;
+    f(e, arg);
+    assert false;
 }
