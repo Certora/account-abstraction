@@ -47,7 +47,7 @@ library Exec {
                 len := maxLen
             }
             let ptr := mload(0x40)
-            mstore(0x40, add(ptr, add(len, 0x20)))
+            mstore(0x40, add(ptr, add(and(add(len, 31), not(31)), 0x20)))
             mstore(ptr, len)
             returndatacopy(add(ptr, 0x20), 0, len)
             returnData := ptr

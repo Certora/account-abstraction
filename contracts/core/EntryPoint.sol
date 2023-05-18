@@ -212,7 +212,7 @@ contract EntryPoint is IEntryPoint, StakeManager {
         MemoryUserOp mUserOp;
         bytes32 userOpHash;
         uint256 prefund;
-        uint256 contextOffset;
+        bytes contextOffset;
         uint256 preOpGas;
     }
 
@@ -604,13 +604,9 @@ contract EntryPoint is IEntryPoint, StakeManager {
         return a < b ? a : b;
     }
 
-    function getOffsetOfMemoryBytes(bytes memory data) internal pure returns (uint256 offset) {
-        assembly {offset := data}
-    }
+    function getOffsetOfMemoryBytes(bytes memory data) internal pure returns (bytes memory) { return data; }
 
-    function getMemoryBytesFromOffset(uint256 offset) internal pure returns (bytes memory data) {
-        assembly {data := offset}
-    }
+    function getMemoryBytesFromOffset(bytes memory data) internal pure returns (bytes memory) { return data; }
 
     //place the NUMBER opcode in the code.
     // this is used as a marker during simulation, as this OP is completely banned from the simulated code of the
