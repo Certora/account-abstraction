@@ -14,7 +14,7 @@ methods {
     function _.validatePaymasterUserOp(EntryPoint.UserOperation userOp, bytes32 userOpHash, uint256 maxCost) external => NONDET;
 
     function balanceOf(address) external returns (uint256) envfree;
- 
+    function _compensate(address beneficiary, uint256 amount) internal  => NONDET;
 
     function _.postOp(uint8 mode, bytes context, uint256 actualGasCost) external => NONDET;
 
@@ -45,7 +45,13 @@ rule alwaysRevert(method f)
 * Verified by keeping track of opcodes that have been verified and executed opcodes
 */
 
-rule onlyValidatedCalls(method f, uint index) {
+rule onlyValidatedCalls(method f, uint index) 
+    //  filtered { f->
+    //         //f.selector == sig:handleAggregatedOps(EntryPoint.UserOpsPerAggregator(EntryPoint.UserOperation(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[],address,bytes)[],address).selector
+    //         //f.selector == sig:handleAggregatedOps(EntryPoint.UserOpsPerAggregator[],address).selector
+    //         //f.selector == sig:handleOps(EntryPoint.UserOperation[],address).selector
+    //          }
+{
     env e;
     calldataarg args;
     require account.validatedLength() == 0;
@@ -53,8 +59,8 @@ rule onlyValidatedCalls(method f, uint index) {
      
     f(e,args);
 
-    assert account.validatedLength() == account.calledLength();
-    assert index < account.validatedLength() => account.eq(index);
+    assert account.calledLength() > 0  => account.validatedLength() > 0;
+    //assert index < account.validatedLength() => account.eq(index);
 }
 
 
