@@ -7,13 +7,11 @@ if git status contracts | grep -v 'nothing to commit'|tee /dev/stderr |grep -q U
   exit 1
 fi
 
-yarn clean 
+yarn clean
 yarn compile
 cd contracts
 
-rm -rf artifacts types dist
+rm -rf artifacts
 
 mkdir -p artifacts
-cp `find  ../artifacts/contracts -type f | grep -v -E 'Test|dbg|gnosis|bls|IOracle'` artifacts/
-npx typechain --target ethers-v5 --out-dir types  artifacts/**
-npx tsc index.ts -d --outDir dist
+cp `find  ../artifacts/contracts -type f | grep -v -E 'test|Test|dbg|bls|IOracle'` artifacts/

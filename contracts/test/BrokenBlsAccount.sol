@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.12;
+
+/* solhint-disable one-contract-per-file */
+pragma solidity ^0.8.23;
 
 import "@openzeppelin/contracts/utils/Create2.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import "../samples/SimpleAccount.sol";
 import "../samples/bls/IBLSAccount.sol";
+import "../core/Helpers.sol";
 
 /**
  * for testing: a BLS account that fails to return its public-key (completely ignores its publickey)
@@ -25,7 +28,7 @@ contract BrokenBLSAccount is SimpleAccount, IBLSAccount {
         super._initialize(address(0));
     }
 
-    function _validateSignature(UserOperation calldata userOp, bytes32 userOpHash)
+    function _validateSignature(PackedUserOperation calldata userOp, bytes32 userOpHash)
     internal override view returns (uint256 validationData) {
 
         (userOp, userOpHash);
@@ -58,10 +61,10 @@ contract BrokenBLSAccountFactory {
      * This method returns an existing account address so that entryPoint.getSenderAddress() would work even after account creation
      * Also note that out BLSSignatureAggregator requires that the public-key is the last parameter
      */
-    function createAccount(uint salt, uint256[4] memory aPublicKey) public returns (BrokenBLSAccount) {
+    function createAccount(uint256 salt, uint256[4] memory aPublicKey) public returns (BrokenBLSAccount) {
 
         address addr = getAddress(salt, aPublicKey);
-        uint codeSize = addr.code.length;
+        uint256 codeSize = addr.code.length;
         if (codeSize > 0) {
             return BrokenBLSAccount(payable(addr));
         }
@@ -74,7 +77,7 @@ contract BrokenBLSAccountFactory {
     /**
      * calculate the counterfactual address of this account as it would be returned by createAccount()
      */
-    function getAddress(uint salt, uint256[4] memory aPublicKey) public view returns (address) {
+    function getAddress(uint256 salt, uint256[4] memory aPublicKey) public view returns (address) {
         return Create2.computeAddress(bytes32(salt), keccak256(abi.encodePacked(
                 type(ERC1967Proxy).creationCode,
                 abi.encode(

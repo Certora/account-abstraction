@@ -1,12 +1,12 @@
 // calculate gas usage of different bundle sizes
 import '../test/aa.init'
-import { defaultAbiCoder, formatEther, hexConcat, parseEther } from 'ethers/lib/utils'
+import { defaultAbiCoder, hexConcat, parseEther } from 'ethers/lib/utils'
 import {
   AddressZero,
   checkForGeth,
   createAddress,
   createAccountOwner,
-  deployEntryPoint
+  deployEntryPoint, decodeRevertReason
 } from '../test/testutils'
 import {
   EntryPoint, EntryPoint__factory, SimpleAccountFactory,
@@ -14,12 +14,14 @@ import {
 } from '../typechain'
 import { BigNumberish, Wallet } from 'ethers'
 import hre from 'hardhat'
-import { fillAndSign } from '../test/UserOp'
+import { fillSignAndPack, fillUserOp, packUserOp, signUserOp } from '../test/UserOp'
 import { TransactionReceipt } from '@ethersproject/abstract-provider'
 import { table, TableUserConfig } from 'table'
 import { Create2Factory } from '../src/Create2Factory'
 import * as fs from 'fs'
 import { SimpleAccountInterface } from '../typechain/contracts/samples/SimpleAccount'
+import { PackedUserOperation } from '../test/UserOperation'
+import { expect } from 'chai'
 
 const gasCheckerLogFile = './reports/gas-checker.txt'
 
@@ -52,7 +54,7 @@ interface GasTestInfo {
 export const DefaultGasTestInfo: Partial<GasTestInfo> = {
   dest: 'self', // destination is the account itself.
   destValue: parseEther('0'),
-  destCallData: '0xaffed0e0', // nonce()
+  destCallData: '0xb0d691fe', // entryPoint()
   gasPrice: 10e9
 }
 
@@ -111,6 +113,8 @@ export class GasChecker {
     ])
   }
 
+  createdAccounts = new Set<string>()
+
   /**
    * create accounts up to this counter.
    * make sure they all have balance.
@@ -123,15 +127,33 @@ export class GasChecker {
       hexConcat([
         SimpleAccountFactory__factory.bytecode,
         defaultAbiCoder.encode(['address'], [this.entryPoint().address])
-      ]), 0, 2708636)
+      ]), 0, 2885201)
     console.log('factaddr', factoryAddress)
     const fact = SimpleAccountFactory__factory.connect(factoryAddress, ethersSigner)
     // create accounts
+    const creationOps: PackedUserOperation[] = []
     for (const n of range(count)) {
       const salt = n
       // const initCode = this.accountInitCode(fact, salt)
 
       const addr = await fact.getAddress(this.accountOwner.address, salt)
+
+      if (!this.createdAccounts.has(addr)) {
+        // explicit call to fillUseROp with no "entryPoint", to make sure we manually fill everything and
+        // not attempt to fill from blockchain.
+        const op = signUserOp(await fillUserOp({
+          sender: addr,
+          nonce: 0,
+          callGasLimit: 30000,
+          verificationGasLimit: 1000000,
+          // paymasterAndData: paymaster,
+          preVerificationGas: 1,
+          maxFeePerGas: 0
+        }), this.accountOwner, this.entryPoint().address, await provider.getNetwork().then(net => net.chainId))
+        creationOps.push(packUserOp(op))
+        this.createdAccounts.add(addr)
+      }
+
       this.accounts[addr] = this.accountOwner
       // deploy if not already deployed.
       await fact.createAccount(this.accountOwner.address, salt)
@@ -140,6 +162,7 @@ export class GasChecker {
         await GasCheckCollector.inst.entryPoint.depositTo(addr, { value: minDepositOrBalance.mul(5) })
       }
     }
+    await this.entryPoint().handleOps(creationOps, ethersSigner.getAddress())
   }
 
   /**
@@ -201,14 +224,16 @@ export class GasChecker {
         }
         // console.debug('== account est=', accountEst.toString())
         accountEst = est.accountEst
-        const op = await fillAndSign({
+        const op = await fillSignAndPack({
           sender: account,
           callData: accountExecFromEntryPoint,
           maxPriorityFeePerGas: info.gasPrice,
           maxFeePerGas: info.gasPrice,
           callGasLimit: accountEst,
           verificationGasLimit: 1000000,
-          paymasterAndData: paymaster,
+          paymaster: paymaster,
+          paymasterVerificationGasLimit: 50000,
+          paymasterPostOpGasLimit: 50000,
           preVerificationGas: 1
         }, accountOwner, GasCheckCollector.inst.entryPoint)
         // const packed = packUserOp(op, false)
@@ -220,10 +245,26 @@ export class GasChecker {
     console.log('=== encoded data=', txdata.length)
     const gasEst = await GasCheckCollector.inst.entryPoint.estimateGas.handleOps(
       userOps, info.beneficiary, {}
-    )
+    ).catch(e => {
+      const data = e.error?.data?.data ?? e.error?.data
+      if (data != null) {
+        const e1 = GasCheckCollector.inst.entryPoint.interface.parseError(data)
+        throw new Error(`${e1.name}(${e1.args?.toString()})`)
+      }
+      throw e
+    })
     const ret = await GasCheckCollector.inst.entryPoint.handleOps(userOps, info.beneficiary, { gasLimit: gasEst.mul(3).div(2) })
     const rcpt = await ret.wait()
     const gasUsed = rcpt.gasUsed.toNumber()
+    const countSuccessOps = rcpt.events?.filter(e => e.event === 'UserOperationEvent' && e.args?.success).length
+
+    rcpt.events?.filter(e => e.event?.match(/PostOpRevertReason|UserOperationRevertReason/)).find(e => {
+      // console.log(e.event, e.args)
+      throw new Error(`${e.event}(${decodeRevertReason(e.args?.revertReason)})`)
+    })
+    // check for failure with no revert reason (e.g. OOG)
+    expect(countSuccessOps).to.eq(userOps.length, 'Some UserOps failed to execute (with no revert reason)')
+
     console.debug('count', info.count, 'gasUsed', gasUsed)
     const gasDiff = gasUsed - lastGasUsed
     if (info.diffLastGas) {
@@ -238,7 +279,9 @@ export class GasChecker {
       title: info.title
       // receipt: rcpt
     }
-    if (info.diffLastGas) { ret1.gasDiff = gasDiff }
+    if (info.diffLastGas) {
+      ret1.gasDiff = gasDiff
+    }
     console.debug(ret1)
     return ret1
   }
@@ -278,7 +321,6 @@ export class GasCheckCollector {
 
     const bal = await getBalance(ethersSigner.getAddress())
     if (bal.gt(parseEther('100000000'))) {
-      console.log('bal=', formatEther(bal))
       console.log('DONT use geth miner.. use account 2 instead')
       await checkForGeth()
       ethersSigner = ethers.provider.getSigner(2)
@@ -338,15 +380,17 @@ export class GasCheckCollector {
       fs.appendFileSync(gasCheckerLogFile, s + '\n')
     }
 
-    write('== gas estimate of direct calling the account\'s "execFromEntryPoint" method')
-    write('   the destination is "account.nonce()", which is known to be "hot" address used by this account')
+    write('== gas estimate of direct calling the account\'s "execute" method')
+    write('   the destination is "account.entryPoint()", which is known to be "hot" address used by this account')
     write('   it little higher than EOA call: its an exec from entrypoint (or account owner) into account contract, verifying msg.sender and exec to target)')
-    Object.values(gasEstimatePerExec).forEach(({ title, accountEst }) => {
-      write(`- gas estimate "${title}" - ${accountEst}`)
-    })
+
+    write(table(Object.values(gasEstimatePerExec).map((row) => [
+      `gas estimate "${row.title}"`, row.accountEst
+    ]), this.tableConfig))
 
     const tableOutput = table(this.tabRows, this.tableConfig)
     write(tableOutput)
+    // process.exit(0)
   }
 
   addRow (res: GasTestResult): void {

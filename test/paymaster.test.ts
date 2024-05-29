@@ -3,12 +3,11 @@ import { ethers } from 'hardhat'
 import { expect } from 'chai'
 import {
   SimpleAccount,
-  EntryPoint,
-  TokenPaymaster,
-  TokenPaymaster__factory,
+  LegacyTokenPaymaster,
+  LegacyTokenPaymaster__factory,
   TestCounter__factory,
   SimpleAccountFactory,
-  SimpleAccountFactory__factory
+  SimpleAccountFactory__factory, EntryPoint
 } from '../typechain'
 import {
   AddressZero,
@@ -20,15 +19,14 @@ import {
   checkForGeth,
   calcGasUsage,
   deployEntryPoint,
-  checkForBannedOps,
   createAddress,
   ONE_ETH,
   createAccount,
-  getAccountAddress
+  getAccountAddress, decodeRevertReason
 } from './testutils'
-import { fillAndSign } from './UserOp'
+import { fillSignAndPack, simulateValidation } from './UserOp'
 import { hexConcat, parseEther } from 'ethers/lib/utils'
-import { UserOperation } from './UserOperation'
+import { PackedUserOperation } from './UserOperation'
 import { hexValue } from '@ethersproject/bytes'
 
 describe('EntryPoint with paymaster', function () {
@@ -59,15 +57,25 @@ describe('EntryPoint with paymaster', function () {
   })
 
   describe('#TokenPaymaster', () => {
-    let paymaster: TokenPaymaster
+    let paymaster: LegacyTokenPaymaster
     const otherAddr = createAddress()
     let ownerAddr: string
     let pmAddr: string
 
     before(async () => {
-      paymaster = await new TokenPaymaster__factory(ethersSigner).deploy(factory.address, 'ttt', entryPoint.address)
+      paymaster = await new LegacyTokenPaymaster__factory(ethersSigner).deploy(factory.address, 'ttt', entryPoint.address)
       pmAddr = paymaster.address
       ownerAddr = await ethersSigner.getAddress()
+    })
+
+    it('paymaster should revert on wrong entryPoint type', async () => {
+      // account is a sample contract with supportsInterface (which is obviously not an entrypoint)
+      const notEntryPoint = account
+      // a contract that has "supportsInterface" but with different interface value..
+      await expect(new LegacyTokenPaymaster__factory(ethersSigner).deploy(factory.address, 'ttt', notEntryPoint.address))
+        .to.be.revertedWith('IEntryPoint interface mismatch')
+      await expect(new LegacyTokenPaymaster__factory(ethersSigner).deploy(factory.address, 'ttt', AddressZero))
+        .to.be.revertedWith('')
     })
 
     it('owner should have allowance to withdraw funds', async () => {
@@ -83,9 +91,9 @@ describe('EntryPoint with paymaster', function () {
   })
 
   describe('using TokenPaymaster (account pays in paymaster tokens)', () => {
-    let paymaster: TokenPaymaster
+    let paymaster: LegacyTokenPaymaster
     before(async () => {
-      paymaster = await new TokenPaymaster__factory(ethersSigner).deploy(factory.address, 'tst', entryPoint.address)
+      paymaster = await new LegacyTokenPaymaster__factory(ethersSigner).deploy(factory.address, 'tst', entryPoint.address)
       await entryPoint.depositTo(paymaster.address, { value: parseEther('1') })
       await paymaster.addStake(1, { value: parseEther('2') })
     })
@@ -97,41 +105,47 @@ describe('EntryPoint with paymaster', function () {
         calldata = await account.populateTransaction.execute(account.address, 0, updateEntryPoint).then(tx => tx.data!)
       })
       it('paymaster should reject if account doesn\'t have tokens', async () => {
-        const op = await fillAndSign({
+        const op = await fillSignAndPack({
           sender: account.address,
-          paymasterAndData: paymaster.address,
+          paymaster: paymaster.address,
+          paymasterPostOpGasLimit: 3e5,
           callData: calldata
         }, accountOwner, entryPoint)
-        await expect(entryPoint.callStatic.handleOps([op], beneficiaryAddress, {
+        expect(await entryPoint.callStatic.handleOps([op], beneficiaryAddress, {
           gasLimit: 1e7
-        })).to.revertedWith('AA33 reverted: TokenPaymaster: no balance')
-        await expect(entryPoint.handleOps([op], beneficiaryAddress, {
+        }).catch(e => decodeRevertReason(e)))
+          .to.include('TokenPaymaster: no balance')
+        expect(await entryPoint.handleOps([op], beneficiaryAddress, {
           gasLimit: 1e7
-        })).to.revertedWith('AA33 reverted: TokenPaymaster: no balance')
+        }).catch(e => decodeRevertReason(e)))
+          .to.include('TokenPaymaster: no balance')
       })
     })
 
     describe('create account', () => {
-      let createOp: UserOperation
+      let createOp: PackedUserOperation
       let created = false
       const beneficiaryAddress = createAddress()
 
       it('should reject if account not funded', async () => {
-        const op = await fillAndSign({
+        const op = await fillSignAndPack({
           initCode: getAccountDeployer(entryPoint.address, accountOwner.address, 1),
           verificationGasLimit: 1e7,
-          paymasterAndData: paymaster.address
+          paymaster: paymaster.address,
+          paymasterPostOpGasLimit: 3e5
         }, accountOwner, entryPoint)
-        await expect(entryPoint.callStatic.handleOps([op], beneficiaryAddress, {
+        expect(await entryPoint.callStatic.handleOps([op], beneficiaryAddress, {
           gasLimit: 1e7
-        }).catch(rethrow())).to.revertedWith('TokenPaymaster: no balance')
+        }).catch(e => decodeRevertReason(e)))
+          .to.include('TokenPaymaster: no balance')
       })
 
       it('should succeed to create account with tokens', async () => {
-        createOp = await fillAndSign({
+        createOp = await fillSignAndPack({
           initCode: getAccountDeployer(entryPoint.address, accountOwner.address, 3),
           verificationGasLimit: 2e6,
-          paymasterAndData: paymaster.address,
+          paymaster: paymaster.address,
+          paymasterPostOpGasLimit: 3e5,
           nonce: 0
         }, accountOwner, entryPoint)
 
@@ -139,9 +153,12 @@ describe('EntryPoint with paymaster', function () {
         await paymaster.mintTokens(preAddr, parseEther('1'))
         // paymaster is the token, so no need for "approve" or any init function...
 
-        await entryPoint.simulateValidation(createOp, { gasLimit: 5e6 }).catch(e => e.message)
-        const [tx] = await ethers.provider.getBlock('latest').then(block => block.transactions)
-        await checkForBannedOps(tx, true)
+        // const snapshot = await ethers.provider.send('evm_snapshot', [])
+        await simulateValidation(createOp, entryPoint.address, { gasLimit: 5e6 })
+        // TODO: can't do opcode banning with EntryPointSimulations (since its not on-chain) add when we can debug_traceCall
+        // const [tx] = await ethers.provider.getBlock('latest').then(block => block.transactions)
+        // await checkForBannedOps(tx, true)
+        // await ethers.provider.send('evm_revert', [snapshot])
 
         const rcpt = await entryPoint.handleOps([createOp], beneficiaryAddress, {
           gasLimit: 1e7
@@ -179,16 +196,17 @@ describe('EntryPoint with paymaster', function () {
         const justEmit = testCounter.interface.encodeFunctionData('justemit')
         const execFromSingleton = account.interface.encodeFunctionData('execute', [testCounter.address, 0, justEmit])
 
-        const ops: UserOperation[] = []
+        const ops: PackedUserOperation[] = []
         const accounts: SimpleAccount[] = []
 
         for (let i = 0; i < 4; i++) {
           const { proxy: aAccount } = await createAccount(ethersSigner, await accountOwner.getAddress(), entryPoint.address)
           await paymaster.mintTokens(aAccount.address, parseEther('1'))
-          const op = await fillAndSign({
+          const op = await fillSignAndPack({
             sender: aAccount.address,
             callData: execFromSingleton,
-            paymasterAndData: paymaster.address
+            paymaster: paymaster.address,
+            paymasterPostOpGasLimit: 3e5
           }, accountOwner, entryPoint)
 
           accounts.push(aAccount)
@@ -221,45 +239,52 @@ describe('EntryPoint with paymaster', function () {
           await paymaster.mintTokens(account.address, parseEther('1'))
           approveCallData = paymaster.interface.encodeFunctionData('approve', [account.address, ethers.constants.MaxUint256])
           // need to call approve from account2. use paymaster for that
-          const approveOp = await fillAndSign({
+          const approveOp = await fillSignAndPack({
             sender: account2.address,
             callData: account2.interface.encodeFunctionData('execute', [paymaster.address, 0, approveCallData]),
-            paymasterAndData: paymaster.address
+            paymaster: paymaster.address,
+            paymasterPostOpGasLimit: 3e5
           }, accountOwner, entryPoint)
           await entryPoint.handleOps([approveOp], beneficiaryAddress)
           expect(await paymaster.allowance(account2.address, account.address)).to.eq(ethers.constants.MaxUint256)
         })
 
-        it('griefing attempt should cause handleOp to revert', async () => {
+        it('griefing attempt in postOp should cause the execution part of UserOp to revert', async () => {
           // account1 is approved to withdraw going to withdraw account2's balance
 
           const account2Balance = await paymaster.balanceOf(account2.address)
           const transferCost = parseEther('1').sub(account2Balance)
           const withdrawAmount = account2Balance.sub(transferCost.mul(0))
           const withdrawTokens = paymaster.interface.encodeFunctionData('transferFrom', [account2.address, account.address, withdrawAmount])
-          // const withdrawTokens = paymaster.interface.encodeFunctionData('transfer', [account.address, parseEther('0.1')])
           const execFromEntryPoint = account.interface.encodeFunctionData('execute', [paymaster.address, 0, withdrawTokens])
 
-          const userOp1 = await fillAndSign({
+          const userOp1 = await fillSignAndPack({
             sender: account.address,
             callData: execFromEntryPoint,
-            paymasterAndData: paymaster.address
+            paymaster: paymaster.address,
+            paymasterPostOpGasLimit: 3e5
           }, accountOwner, entryPoint)
 
-          // account2's operation is unimportant, as it is going to be reverted - but the paymaster will have to pay for it..
-          const userOp2 = await fillAndSign({
+          // account2's operation is unimportant, as it is going to be reverted - but the paymaster will have to pay for it.
+          const userOp2 = await fillSignAndPack({
             sender: account2.address,
             callData: execFromEntryPoint,
-            paymasterAndData: paymaster.address,
+            paymaster: paymaster.address,
+            paymasterPostOpGasLimit: 3e5,
             callGasLimit: 1e6
           }, accountOwner, entryPoint)
 
-          await expect(
-            entryPoint.handleOps([
+          const rcpt =
+            await entryPoint.handleOps([
               userOp1,
               userOp2
             ], beneficiaryAddress)
-          ).to.be.revertedWith('transfer amount exceeds balance')
+
+          const transferEvents = await paymaster.queryFilter(paymaster.filters.Transfer(), rcpt.blockHash)
+          const [log1, log2] = await entryPoint.queryFilter(entryPoint.filters.UserOperationEvent(), rcpt.blockHash)
+          expect(log1.args.success).to.eq(true)
+          expect(log2.args.success).to.eq(false)
+          expect(transferEvents.length).to.eq(2)
         })
       })
     })

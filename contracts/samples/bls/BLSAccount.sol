@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.12;
+pragma solidity ^0.8.23;
 
 import "../SimpleAccount.sol";
 import "./IBLSAccount.sol";
+import "../../core/Helpers.sol";
 
 /**
  * Minimal BLS-based account that uses an aggregated signature.
@@ -30,7 +31,7 @@ contract BLSAccount is SimpleAccount, IBLSAccount {
         _setBlsPublicKey(aPublicKey);
     }
 
-    function _validateSignature(UserOperation calldata userOp, bytes32 userOpHash)
+    function _validateSignature(PackedUserOperation calldata userOp, bytes32 userOpHash)
     internal override view returns (uint256 validationData) {
 
         (userOp, userOpHash);

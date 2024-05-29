@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.12;
+pragma solidity ^0.8.23;
 
 /* solhint-disable avoid-low-level-calls */
 /* solhint-disable no-inline-assembly */
 /* solhint-disable reason-string */
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
-
 import "../core/BaseAccount.sol";
+import "../core/Helpers.sol";
+import "./callback/TokenCallbackHandler.sol";
 
 /**
   * minimal account.
@@ -17,15 +19,7 @@ import "../core/BaseAccount.sol";
   *  has execute, eth handling methods
   *  has a single signer that can send requests through the entryPoint.
   */
-contract SimpleAccount is BaseAccount, UUPSUpgradeable, Initializable {
-    using ECDSA for bytes32;
-
-    //filler member, to push the nonce and owner to the same slot
-    // the "Initializeble" class takes 2 bytes in the first slot
-    bytes28 private _filler;
-
-    //explicit sizes of nonce, to fit a single storage cell with "owner"
-    uint96 private _nonce;
+contract SimpleAccount is BaseAccount, TokenCallbackHandler, UUPSUpgradeable, Initializable {
     address public owner;
 
     IEntryPoint private immutable _entryPoint;
@@ -38,15 +32,9 @@ contract SimpleAccount is BaseAccount, UUPSUpgradeable, Initializable {
     }
 
     /// @inheritdoc BaseAccount
-    function nonce() public view virtual override returns (uint256) {
-        return _nonce;
-    }
-
-    /// @inheritdoc BaseAccount
     function entryPoint() public view virtual override returns (IEntryPoint) {
         return _entryPoint;
     }
-
 
     // solhint-disable-next-line no-empty-blocks
     receive() external payable {}
@@ -63,6 +51,9 @@ contract SimpleAccount is BaseAccount, UUPSUpgradeable, Initializable {
 
     /**
      * execute a transaction (called directly from owner, or by entryPoint)
+     * @param dest destination address to call
+     * @param value the value to pass in this call
+     * @param func the calldata to pass in this call
      */
     function execute(address dest, uint256 value, bytes calldata func) external {
         _requireFromEntryPointOrOwner();
@@ -71,12 +62,22 @@ contract SimpleAccount is BaseAccount, UUPSUpgradeable, Initializable {
 
     /**
      * execute a sequence of transactions
+     * @dev to reduce gas consumption for trivial case (no value), use a zero-length array to mean zero value
+     * @param dest an array of destination addresses
+     * @param value an array of values to pass to each call. can be zero-length for no-value calls
+     * @param func an array of calldata to pass to each call
      */
-    function executeBatch(address[] calldata dest, bytes[] calldata func) external {
+    function executeBatch(address[] calldata dest, uint256[] calldata value, bytes[] calldata func) external {
         _requireFromEntryPointOrOwner();
-        require(dest.length == func.length, "wrong array lengths");
-        for (uint256 i = 0; i < dest.length; i++) {
-            _call(dest[i], 0, func[i]);
+        require(dest.length == func.length && (value.length == 0 || value.length == func.length), "wrong array lengths");
+        if (value.length == 0) {
+            for (uint256 i = 0; i < dest.length; i++) {
+                _call(dest[i], 0, func[i]);
+            }
+        } else {
+            for (uint256 i = 0; i < dest.length; i++) {
+                _call(dest[i], value[i], func[i]);
+            }
         }
     }
 
@@ -84,6 +85,7 @@ contract SimpleAccount is BaseAccount, UUPSUpgradeable, Initializable {
      * @dev The _entryPoint member is immutable, to reduce gas consumption.  To upgrade EntryPoint,
      * a new implementation of SimpleAccount must be deployed with the new EntryPoint address, then upgrading
       * the implementation by calling `upgradeTo()`
+      * @param anOwner the owner (signer) of this account
      */
     function initialize(address anOwner) public virtual initializer {
         _initialize(anOwner);
@@ -100,21 +102,16 @@ contract SimpleAccount is BaseAccount, UUPSUpgradeable, Initializable {
     }
 
     /// implement template method of BaseAccount
-    function _validateAndUpdateNonce(UserOperation calldata userOp) internal override {
-        require(_nonce++ == userOp.nonce, "account: invalid nonce");
-    }
-
-    /// implement template method of BaseAccount
-    function _validateSignature(UserOperation calldata userOp, bytes32 userOpHash)
+    function _validateSignature(PackedUserOperation calldata userOp, bytes32 userOpHash)
     internal override virtual returns (uint256 validationData) {
-        bytes32 hash = userOpHash.toEthSignedMessageHash();
-        if (owner != hash.recover(userOp.signature))
+        bytes32 hash = MessageHashUtils.toEthSignedMessageHash(userOpHash);
+        if (owner != ECDSA.recover(hash, userOp.signature))
             return SIG_VALIDATION_FAILED;
-        return 0;
+        return SIG_VALIDATION_SUCCESS;
     }
 
     function _call(address target, uint256 value, bytes memory data) internal {
-        (bool success, bytes memory result) = target.call{value : value}(data);
+        (bool success, bytes memory result) = target.call{value: value}(data);
         if (!success) {
             assembly {
                 revert(add(result, 32), mload(result))
@@ -133,7 +130,7 @@ contract SimpleAccount is BaseAccount, UUPSUpgradeable, Initializable {
      * deposit more funds for this account in the entryPoint
      */
     function addDeposit() public payable {
-        entryPoint().depositTo{value : msg.value}(address(this));
+        entryPoint().depositTo{value: msg.value}(address(this));
     }
 
     /**

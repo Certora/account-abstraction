@@ -1,6 +1,6 @@
 import '@nomiclabs/hardhat-waffle'
 import '@typechain/hardhat'
-import { HardhatUserConfig } from 'hardhat/config'
+import { HardhatUserConfig, task } from 'hardhat/config'
 import 'hardhat-deploy'
 import '@nomiclabs/hardhat-etherscan'
 
@@ -8,7 +8,13 @@ import 'solidity-coverage'
 
 import * as fs from 'fs'
 
-const mnemonicFileName = process.env.MNEMONIC_FILE ?? `${process.env.HOME}/.secret/testnet-mnemonic.txt`
+const SALT = '0x90d8084deab30c2a37c45e8d47f49f2f7965183cb6990a98943ef94940681de3'
+process.env.SALT = process.env.SALT ?? SALT
+
+task('deploy', 'Deploy contracts')
+  .addFlag('simpleAccountFactory', 'deploy sample factory (by default, enabled only on localhost)')
+
+const mnemonicFileName = process.env.MNEMONIC_FILE!
 let mnemonic = 'test '.repeat(11) + 'junk'
 if (fs.existsSync(mnemonicFileName)) { mnemonic = fs.readFileSync(mnemonicFileName, 'ascii') }
 
@@ -25,7 +31,7 @@ function getNetwork (name: string): { url: string, accounts: { mnemonic: string 
 }
 
 const optimizedComilerSettings = {
-  version: '0.8.17',
+  version: '0.8.23',
   settings: {
     optimizer: { enabled: true, runs: 1000000 },
     viaIR: true
@@ -38,7 +44,7 @@ const optimizedComilerSettings = {
 const config: HardhatUserConfig = {
   solidity: {
     compilers: [{
-      version: '0.8.15',
+      version: '0.8.23',
       settings: {
         optimizer: { enabled: true, runs: 1000000 }
       }
@@ -53,13 +59,13 @@ const config: HardhatUserConfig = {
     // github action starts localgeth service, for gas calculations
     localgeth: { url: 'http://localgeth:8545' },
     goerli: getNetwork('goerli'),
-    proxy: getNetwork1('http://localhost:8545'),
-    kovan: getNetwork('kovan')
+    sepolia: getNetwork('sepolia'),
+    proxy: getNetwork1('http://localhost:8545')
   },
   mocha: {
     timeout: 10000
   },
-
+  // @ts-ignore
   etherscan: {
     apiKey: process.env.ETHERSCAN_API_KEY
   }
