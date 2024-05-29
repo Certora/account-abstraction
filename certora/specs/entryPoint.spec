@@ -2,16 +2,16 @@ using SymbolicAccount as account;
 
 methods {
 
-    function _.validateUserOp(EntryPoint.UserOperation,bytes32,uint256) external => DISPATCHER(true);
+    function _.validateUserOp(EntryPoint.PackedUserOperation,bytes32,uint256) external => DISPATCHER(true);
     //function SymbolicAccount.called() external returns (bool) envfree;
 
-    // 
+    //
     function _.createSender(bytes initCode) external => NONDET;
 
     // Paymaster
    // validatePaymasterUserOp(EntryPoint.UserOperation  userOp, bytes32 userOpHash, uint256 maxCost)=> NONDET
 
-    function _.validatePaymasterUserOp(EntryPoint.UserOperation userOp, bytes32 userOpHash, uint256 maxCost) external => NONDET;
+    function _.validatePaymasterUserOp(EntryPoint.PackedUserOperation userOp, bytes32 userOpHash, uint256 maxCost) external => NONDET;
 
     function balanceOf(address) external returns (uint256) envfree;
     function _compensate(address beneficiary, uint256 amount) internal  => NONDET;
@@ -26,26 +26,26 @@ methods {
 }
 
 //// # Verifies that certain function always revert as expected */
-rule alwaysRevert(method f) 
+rule alwaysRevert(method f)
     filtered { f->
-            f.selector == sig:_validateSenderAndPaymaster(bytes,address,bytes).selector ||
+            f.selector == sig:EntryPointSimulations._validateSenderAndPaymaster(bytes,address,bytes).selector ||
             f.selector == sig:getSenderAddress(bytes).selector ||
-            f.selector == sig:simulateValidation(EntryPoint.UserOperation).selector }
+            f.selector == sig:EntryPointSimulations.simulateValidation(EntryPoint.PackedUserOperation).selector }
 
     {
         env e;
         calldataarg args;
         f@withrevert(e,args);
-        assert lastReverted; 
+        assert lastReverted;
 }
 
 
-//// # Check that every op that exec-ed on an account has been checked via the validateUserOp function 
+//// # Check that every op that exec-ed on an account has been checked via the validateUserOp function
 /**
 * Verified by keeping track of opcodes that have been verified and executed opcodes
 */
 
-rule onlyValidatedCalls(method f, uint index) 
+rule onlyValidatedCalls(method f, uint index)
     //  filtered { f->
     //         //f.selector == sig:handleAggregatedOps(EntryPoint.UserOpsPerAggregator(EntryPoint.UserOperation(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[],address,bytes)[],address).selector
     //         //f.selector == sig:handleAggregatedOps(EntryPoint.UserOpsPerAggregator[],address).selector
@@ -56,7 +56,7 @@ rule onlyValidatedCalls(method f, uint index)
     calldataarg args;
     require account.validatedLength() == 0;
     require account.calledLength() == 0;
-     
+
     f(e,args);
 
     assert account.calledLength() > 0  => account.validatedLength() > 0;
@@ -64,10 +64,10 @@ rule onlyValidatedCalls(method f, uint index)
 }
 
 
-//// # Validity of balance decrease 
+//// # Validity of balance decrease
 /**
 *  Who can decrease balance of (in StakeManager) ?
-*/ 
+*/
 rule onlySelfReduces(method f, address user) {
     env e;
     calldataarg args;
