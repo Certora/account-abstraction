@@ -36,11 +36,4 @@ interface IAccount {
         bytes32 userOpHash,
         uint256 missingAccountFunds
     ) external returns (uint256 validationData);
-
-    function execCall(
-        address to,
-        uint256 value,
-        bytes memory data,
-        uint256 txGas
-    ) external returns (bool);
 }

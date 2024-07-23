@@ -338,8 +338,7 @@ contract EntryPoint is IEntryPoint, StakeManager, NonceManager, ReentrancyGuard,
 
         IPaymaster.PostOpMode mode = IPaymaster.PostOpMode.opSucceeded;
         if (callData.length > 0) {
-            //CERTORA temp change :
-            bool success = IAccount(constantSender).execCall(constantSender, 0, callData, callGasLimit);
+            bool success = Exec.call(mUserOp.sender, 0, callData, callGasLimit);
             if (!success) {
                 bytes memory result = Exec.getReturnData(REVERT_REASON_MAX_LEN);
                 if (result.length > 0) {
@@ -454,8 +453,6 @@ contract EntryPoint is IEntryPoint, StakeManager, NonceManager, ReentrancyGuard,
         revert SenderAddressResult(sender);
     }
 
-    address public constantSender; // CERTORA temp fix
-
     /**
      * Call account.validateUserOp.
      * Revert (with FailedOp) in case validateUserOp reverts, or account didn't send required prefund.
@@ -490,7 +487,7 @@ contract EntryPoint is IEntryPoint, StakeManager, NonceManager, ReentrancyGuard,
                     : requiredPrefund - bal;
             }
             try
-                IAccount(constantSender).validateUserOp{ // CERTORA
+                IAccount(sender).validateUserOp{
                     gas: verificationGasLimit
                 }(op, opInfo.userOpHash, missingAccountFunds)
             returns (uint256 _validationData) {
@@ -799,14 +796,5 @@ contract EntryPoint is IEntryPoint, StakeManager, NonceManager, ReentrancyGuard,
     function delegateAndRevert(address target, bytes calldata data) external {
         (bool success, bytes memory ret) = target.delegatecall(data);
         revert DelegateAndRevert(success, ret);
-    }
-
-    //place the NUMBER opcode in the code.
-    // this is used as a marker during simulation, as this OP is completely banned from the simulated code of the
-    // account and paymaster.
-    function numberMarker() internal view {
-        assembly {
-            mstore(0, number())
-        }
     }
 }

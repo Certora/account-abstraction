@@ -26,13 +26,21 @@ contract SymbolicAccount {
         PackedUserOperation calldata userOp,
         bytes32 userOpHash,
         uint256 missingAccountFunds
-    ) external returns (uint256 validationData) {
+    ) public returns (uint256 validationData) {
         bytes32 encode = keccak256(
             abi.encodePacked(userOp.sender, userOp.nonce, userOp.callData)
         );
         validationData = _packValidationData(validationReturnValue[encode]);
 
         validated_data.push(userOp.callData);
+    }
+
+    function validatePaymasterUserOp(PackedUserOperation calldata userOp, bytes32 userOpHash, uint256 maxCost) public returns (bytes memory context, uint256 validationData) {
+        bytes32 encode = keccak256(
+            abi.encodePacked(uint256(777), userOp.sender, userOp.nonce, userOp.callData)
+        );
+        context = "";
+        validationData = _packValidationData(validationReturnValue[encode]);
     }
 
     function execCall(
